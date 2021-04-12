@@ -13,7 +13,7 @@
 ### United States Cities Database
 
 * used to map cities to counties/states
-* source: https://simplemaps.com/data/us-cities
+* source: Free US Cities Database, https://simplemaps.com/data/us-cities
 
 ### Historical Hourly Weather Data 2012-2017
 * source: https://www.kaggle.com/selfishgene/historical-hourly-weather-data
