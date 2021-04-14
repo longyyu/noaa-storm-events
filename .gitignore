@@ -2,7 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
-data/
+data/StormEvents_details*.csv
 cache/
 noaa-storm-events.Rproj
 
