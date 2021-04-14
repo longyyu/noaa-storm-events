@@ -1,75 +1,68 @@
-library(tidyverse)
-
-# get the list of the 27 counties we have weather data for --------------------
-
-# the US cities dataset
-us_cities = read.csv("data/uscities.csv", stringsAsFactors = FALSE) %>%
-  select(state_id, state = state_name, 
-         county_fips, county = county_name, city, lat, lng) %>% 
-  mutate(city = ifelse(city == "St. Louis", "Saint Louis", city))
-
-# the 27 cities weather dataset
-folder = "data/historical-hourly-weather-data_2012-2017"
-
-# join the 27 cities weather dataset and the US cities dataset
-# by city name, longitude and latitude 
-city = read.csv(sprintf("%s/%s", folder, "city_attributes.csv"), 
-                stringsAsFactors = FALSE) %>% 
-  filter(Country == "United States") %>% 
-  left_join(us_cities, by = c("City" = "city")) %>%
-  # when there are multiple cities with the same names, keep the record with the minimum distance
-  mutate(distance = sqrt((Latitude - lat)^2 + (Longitude - lng)^2)) %>% 
-  group_by(City) %>% filter(distance == min(distance)) %>% ungroup() %>%
-  select(city = City, state, county, county_fips, lat = Latitude, long = Longitude) #state_id, county_fips
-
-# cat(paste0(sprintf("%s, %s", city$county, city$state), collapse = '\n'))
-
-library(albersusa)
-mapdata  = usa_composite() %>% fortify(us, region = "name")
-ggplot() +
-  theme_bw() + 
-  geom_polygon(data = mapdata, aes(long, lat, group = group),
-               colour = "grey",fill = NA) +
-  scale_x_continuous(limits = c(-125, -70)) +
-  coord_map("polyconic") +
-  geom_point(data = city, aes(long, lat), color = "darkred", size = 4, alpha = .4) +
-  labs(x = "", y = "") +
-  ggtitle("27 U.S. Cities") + theme(plot.title = element_text(hjust = .5))
-
-
-
-# read, transform, and rbind the storm event datasets -------------------------
-ws_file = "windstorm_num_episodes_by_county_ym_2012_2017.RData"
-if (!file.exists(ws_file)) {
-  read_windstorm_data = function(path) {
-    read.csv(path, stringsAsFactors = FALSE) %>% 
-      filter(CZ_TYPE == 'C') %>%
-      select(ym = BEGIN_YEARMONTH, state = STATE, county = CZ_NAME, 
-             event_type = EVENT_TYPE, episode_id = EPISODE_ID) %>% 
-      group_by(state, county, ym) %>%
-      summarise(num_episodes = n_distinct(episode_id), .groups = "drop")
-  } # read_windstorm_data()
+merge_weather_windstorm_data = function(MATCH_WEATHER_PREV_MONTH = FALSE) {
+  suppressPackageStartupMessages({
+    library(tidyverse)
+    library(lubridate) # date addition/subtraction
+  })
   
-  file_names = paste0("data/", c(
-    "StormEvents_details-ftp_v1.0_d2012_c20200317.csv",
-    "StormEvents_details-ftp_v1.0_d2013_c20170519.csv",
-    "StormEvents_details-ftp_v1.0_d2014_c20210120.csv",
-    "StormEvents_details-ftp_v1.0_d2015_c20191116.csv",
-    "StormEvents_details-ftp_v1.0_d2016_c20190817.csv",
-    "StormEvents_details-ftp_v1.0_d2017_c20210120.csv"
-  ))
-  windstorm = lapply(file_names, read_windstorm_data) %>% bind_rows()
-  save(windstorm, file = ws_file)
-}
-load(ws_file)
-windstorm = windstorm %>% filter(county %in% toupper(city$county))
+  # find the <state, county> for the 27 cities where weather data are vailable 
+  
+  # the US cities dataset - helps match cities to states and counties
+  us_cities = read.csv("data/uscities.csv", stringsAsFactors = FALSE) %>%
+    select(state_id, state = state_name, 
+           county_fips, county = county_name, city, lat, lng) %>% 
+    mutate(city = ifelse(city == "St. Louis", "Saint Louis", city))
+  
+  
+  city = read.csv(sprintf("data/weather/%s", "city_attributes.csv"), 
+                  stringsAsFactors = FALSE) %>% 
+    filter(Country == "United States") %>% 
+    # join the 27 cities weather dataset and the US cities dataset by city names
+    left_join(us_cities, by = c("City" = "city")) %>%
+    # when there are multiple cities with the same names, keep the record with the minimum distance
+    mutate(distance = sqrt((Latitude - lat)^2 + (Longitude - lng)^2)) %>% 
+    group_by(City) %>% filter(distance == min(distance)) %>% ungroup() %>%
+    select(city = City, state, county)
+  
+  
+  # prepare the windstorm data for merging ------------------------------------
+  source("reshape_windstorm_data.R") # load the windstorm data
+  windstorm = windstorm %>% 
+    # change the `ym` column in windstorm to "%Y-%m" format
+    mutate(year = round(ym / 100), month = ym %% 100,
+           ym = sprintf("%4i-%02i", year, month)) %>%
+    select(-year, -month) %>% 
+    # join the `county` and `state` to produce a key used for merging
+    mutate(key = toupper(paste0(county, ',', state))) %>% 
+    select(-state, -county)
+  
+  
+  # prepare the weather data for merging --------------------------------------
+  source("reshape_weather_data.R") # load the weather data
+  # match weather dataset's cities to <state, county>
+  weather = weather %>% 
+    left_join(
+      city %>% mutate(key = toupper(paste0(county, ',', state))) %>% select(city, key), 
+      by = "city"
+    )
+  
+  if (MATCH_WEATHER_PREV_MONTH) {
+    weather = weather %>%
+      mutate(ym = as.Date(paste0(ym, "-01")) %m+% months(1) %>% format("%Y-%m"))
+  }
+  
+  # merge weather and windstorm datasets --------------------------------------
+  # left join, if num_episodes is NA then replace with 0 - no windstorm that month
+  weather %>%
+    left_join(windstorm, by = c("ym", "key")) %>% select(-key) %>%
+    left_join(city, by = "city") %>%
+    select(ym, city, county, state, num_episodes, everything()) %>%
+    replace_na(list(num_episodes = 0))
+  
+} # merge_weather_windstorm_data()
 
-
-# -----------------------------------------------------------------------------
-windstorm_merged = city %>% 
-  mutate(state = toupper(state), county = toupper(county)) %>%
-  left_join(windstorm, by = c("state", "county"))
-
-windstorm_merged %>%
-  group_by(county_fips, state, county) %>% summarise(count = n()) %>% 
-  arrange(-count)
+# match windstorm to weather in the same month
+data_merged = merge_weather_windstorm_data(MATCH_WEATHER_PREV_MONTH = FALSE)
+save(data_merged, file = "data/windstorm_weather_same_month.RData")
+# match windstorm to weather in the previous month
+data_merged = merge_weather_windstorm_data(MATCH_WEATHER_PREV_MONTH = TRUE)
+save(data_merged, file = "data/windstorm_weather_prev_month.RData")
