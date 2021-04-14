@@ -1,12 +1,13 @@
 ---
-title: Project Data Exploration
-subtitle: STATS551, WN21
+title: Project Data Exploration and Preprocessing
+subtitle: STATS503, WN21
 author: Yanyu Long
-date: Mar 15, 2021
+date: Apr 14, 2021
 output: 
   html_document:
     toc: true
     toc_depth: 3
+    theme: flatly
 ---
 
 ```{r setup, include = FALSE}
@@ -44,56 +45,347 @@ plot_roc = function(pred_prob, actual) {
 } # plot_roc()
 ```
 
-## Historical Weather Dataset on 30 US & Canada cities: 2012-2017
-
-* Data Source: [Kaggle](https://www.kaggle.com/selfishgene/historical-hourly-weather-data). 
-
-```{r}
-folder = "weather"
-city = read.csv(sprintf("%s/%s", folder, "city_attributes.csv"), 
-                stringsAsFactors = FALSE) %>%
-  filter(Country == "United States")
-table(city$Country)
+```{css, echo = FALSE}
+.hl {
+  color: Darkred;
+  font-weight: bold;
+}
 ```
 
-```{r}
-read_weather_data = function(varname) {
-  read.csv(sprintf("%s/%s.csv", folder, varname),
-                    stringsAsFactors = FALSE) %>%
-    mutate(datetime = strptime(datetime, format = "%Y-%m-%d %H:%M:%S")) %>%
-    pivot_longer(-"datetime", names_to = "city", values_to = varname) %>%
-    drop_na()
-} # read_weather_data()
-```
+---
+
+## Summary
+
+* On the weather dataset
+    - I converted the hourly weather data to monthly summary statistics. See the [reshaping weather data](#reshaping-weather-data) subsection for details. 
+* On the storm event dataset
+    - We will only look at events reported by counties (CZ_TYPE == 'C') and drop those reported by forecast zones (CZ_TYPE == 'Z').
+    - One `episode_id` can correspond to multiple `event_id`s. I used episodes as the unit of extreme weather events - multiple events with the same `episode_id` are considered to be one event.
+    - I aggregated the event data to monthly records - the number of episodes in a county in a month. See the [wind storm dataset](#wind-storm-dataset) section. 
+* On merging the two datasets
+    - The number of extreme weather events (# of episodes) were aggregated on the county level, while the weather records were observed in cities and used as an approximation for county-level weather status. Our analysis and discussion should be on the county level.
+    - I prepared two merging approaches, one matches the storm events to the weather data in the same month (can be used for in-time "predictions"), the other matches storm events to the weather data in the previous month (can be used for forecasting). The two approaches correspond to the two versions of final outputs `windstorm_weather_same_month.RData` and `windstorm_weather_prev_month.RData`. They can be used directly for model training. 
+    - See the [merging windstorm and weather datasets](#merging-windstorm-and-weather-datasets) section for details.
+
+---
+
+## Hourly weather dataset
+
+* Data Source: [Historical Weather Dataset on 30 US & Canada cities: 2012-2017](https://www.kaggle.com/selfishgene/historical-hourly-weather-data). 
+* The 27 U.S. cities we have weather records for:  
 
 ```{r}
-pressure = read_weather_data("pressure")
+# the US cities dataset - helps match cities to states and counties
+us_cities = read.csv("data/uscities.csv", stringsAsFactors = FALSE) %>%
+  select(state_id, state = state_name, 
+         county_fips, county = county_name, city, lat, lng) %>% 
+  mutate(city = ifelse(city == "St. Louis", "Saint Louis", city))
 
-wind_speed = read_weather_data("wind_speed")
-
-humidity = read_weather_data("humidity")
-
-temperature = read_weather_data("temperature")
-
-wind_direction = read_weather_data("wind_direction")
+# join the 27 cities weather dataset and the US cities dataset by city name, longitude and latitude 
+city = read.csv(sprintf("data/weather/%s", "city_attributes.csv"), 
+                stringsAsFactors = FALSE) %>% 
+  filter(Country == "United States") %>% 
+  left_join(us_cities, by = c("City" = "city")) %>%
+  # when there are multiple cities with the same names, keep the record with the minimum distance
+  mutate(distance = sqrt((Latitude - lat)^2 + (Longitude - lng)^2)) %>% 
+  group_by(City) %>% filter(distance == min(distance)) %>% ungroup() %>%
+  select(state, county, county_fips, city = City, lat = Latitude, long = Longitude) 
 ```
+
+```{r, echo = FALSE}
+city1 = city %>% select(state, county, city) %>% slice(1:14)
+city2 = city %>% select(state, county, city) %>% slice(15:27) %>% add_row()
+bind_cols(city1, city2) %>%
+  knitr::kable(col.names = rep(c("state", "county", "city"), 2)) %>%
+  kableExtra::column_spec (3, border_right = TRUE) %>%
+  kableExtra::kable_styling("striped", full_width = FALSE)
+```
+
+```{r, fig.width = 6, fig.height = 4, fig.cap = "27 U.S. Cities"}
+map_cache = "cache/usa_map_data.RData"
+if (!file.exists(map_cache)) {
+  library(albersusa) # remotes::install_github("hrbrmstr/albersusa")
+  mapdata  = usa_composite() %>% fortify(us, region = "name")
+  save(mapdata, file = map_cache)
+}
+load(file = map_cache)
+
+ggplot() +
+  theme_bw() + 
+  geom_polygon(data = mapdata, aes(long, lat, group = group),
+               colour = "grey",fill = NA) +
+  scale_x_continuous(limits = c(-125, -70)) +
+  coord_map("polyconic") +
+  geom_point(data = city, aes(long, lat), color = "darkred", size = 2, alpha = .6) +
+  labs(x = "", y = "")
+```
+
+---
+
+### Reshaping weather data {.tabset}
+
+The weather dataset contains hourly observations for humidity, pressure, temperature, wind direction, and wind speed, all of which are numeric variables. I did the following transformation:  
+
+* For humidity, pressure, wind direction, and wind speed:
+    - convert hourly data to daily mean values
+    - compute monthly average and standard deviation of the daily mean values
+    
+Take humidity as an example. 
+
+```{r, echo = FALSE}
+dis_city_list = c("Portland", "San Francisco", "Seattle", "Los Angeles", "San Diego")
+if (!file.exists("cache/reshape_humidity.RData")) {
+  varname = "humidity"
+  
+  df0 = read.csv(sprintf("data/weather/%s.csv", varname), stringsAsFactors = FALSE) %>%
+    rename_with(.cols = -"datetime", .fn = ~str_replace(.x, "\\.", " ")) %>%
+    mutate(datetime = strptime(datetime, format = "%Y-%m-%d %H:%M:%S"),
+           date = format(datetime, "%Y-%m-%d"))
+  
+  us_cities_27 = city$city
+  df1 = df0 %>%
+    pivot_longer(-c("datetime", "date"), names_to = "city", values_to = varname) %>%
+    # keep records of the U.S. cities only
+    filter(city %in% us_cities_27) %>%
+    # convert hourly data to daily mean values
+    group_by(date, city) %>%
+    summarise_at(varname, ~mean(.x, na.rm = TRUE)) %>% ungroup() %>%
+    mutate_at(varname, .funs = ~ifelse(is.finite(.x), .x, NA))
+  
+  df2 = df1 %>%
+    # compute monthly avg and sd of daily mean values
+    mutate(ym = substr(date, 1, 7)) %>%
+    group_by(ym, city) %>%
+    summarise_at(varname, .funs = list(
+      avg = ~ mean(.x, na.rm = TRUE),
+      sd = ~ sd(.x, na.rm = TRUE)
+    )) %>% ungroup() %>%
+    rename_with(.cols = c("avg", "sd"), .fn = ~sprintf("%s_%s", varname, .x))
+  
+  save(df0, df1, df2, file = "cache/reshape_humidity.RData")
+  
+}
+load(file = "cache/reshape_humidity.RData")
+```
+#### The original data
+
+```{r, echo = FALSE}
+df0 %>%
+  select(all_of(c("datetime", dis_city_list))) %>% head() %>% 
+  knitr::kable() %>% kableExtra::kable_styling("striped", full_width = FALSE)
+```
+
+#### Compute daily means
+
+```{r, echo = FALSE}
+df1 %>% filter(city == "Portland") %>% head() %>% 
+  knitr::kable() %>% kableExtra::kable_styling("striped", full_width = FALSE)
+```
+
+#### Compute monthly average and sd
+
+```{r, echo = FALSE}
+df2 %>% filter(city == "Portland") %>% head() %>% 
+  knitr::kable() %>% kableExtra::kable_styling("striped", full_width = FALSE)
+```
+
+
+### {- .unlisted .unnumbered}
+
+---
+
+* For temperature: 
+    - convert hourly observations to (i) daily mean temperature `meantemp` and (ii) diurnal temperature variation `difftemp` (the difference between the max and min temperature within a day)
+    - compute monthly average values and standard deviations of the daily mean temperatures and diurnal variations
+   
+After transformation:  
+
+```{r, echo = FALSE}
+load("data/weather_aggre_ym_city.RData")
+weather %>% select(ym, city, contains("temp")) %>% head() %>% 
+  knitr::kable() %>% kableExtra::kable_styling("striped", full_width = FALSE)
+```
+
+---
 
 ## Wind storm dataset
 
+* Data source: [National Centers for Environmental Information (NOAA)](https://www1.ncdc.noaa.gov/pub/data/swdi/stormevents/csvfiles/)
+* Time frame: 2012-2017 (to match the hourly weather dataset)
+
+There are two types of records in the wind storm datasets: some events are reported by forecast zone (CZTYPE of “Z”), others by county (CZTYPE of “C”). [We will only look at events reported by counties]{.hl}, but here are some examples for both types. 
+
 ```{r}
-# read windstorm data
 windstorm_2017 = read.csv(
-  "./windstorm/StormEvents_details-ftp_v1.0_d2017_c20210120.csv",
+  "./data/StormEvents_details-ftp_v1.0_d2017_c20210120.csv",
   stringsAsFactors = FALSE
-) %>% 
+)
+
+windstorm_2017 %>% 
+  filter(CZ_TYPE == 'Z') %>%
+  select(EPISODE_ID, EVENT_ID, BEGIN_YEARMONTH, BEGIN_DAY, STATE, CZ_NAME, 
+         EVENT_TYPE) %>% head(4) %>%
+  knitr::kable(caption = "Events reported by forecast zones ('Z')") %>%
+  kableExtra::kable_styling("striped")
+
+windstorm_2017 %>% 
   filter(CZ_TYPE == 'C') %>%
-  select(ym = BEGIN_YEARMONTH, day = BEGIN_DAY, state = STATE, county = CZ_NAME, 
-         event_type = EVENT_TYPE, episode_id = EPISODE_ID, event_id = EVENT_ID)
-epi = windstorm_2017 %>% filter(episode_id == 115177)
-nrow(epi)
-range(epi$day)
-table(epi$event_type)
+  select(EPISODE_ID, EVENT_ID, BEGIN_YEARMONTH, BEGIN_DAY, STATE, CZ_NAME, 
+         EVENT_TYPE) %>% head(4) %>%
+  knitr::kable(caption = "Events reported by counties ('C') - `CZ_NAME`s are county names") %>%
+  kableExtra::kable_styling("striped")
 ```
 
+
 One `episode_id` can correspond to multiple `event_id`s. In 2017, 151 events were recorded under the episode ID `115177`, all of which happened during May 26-28. The episode narrative reads: "Multiple rounds of severe thunderstorms brought damaging straight-line winds, large hail, tornadoes, and flooding to the Missouri Ozarks from May 27th into the early morning hours of May 28th. Over 130 reports of severe weather and flooding were received from the Missouri Ozarks." 
-In the following data analysis, we will use episodes as the unit of extreme weather events. 
+In the following data analysis, [we will use episodes as the unit of extreme weather events. For example, we consider the episode 115177 to be one extreme weather event. ]{.hl}
+
+```{r}
+ws_temp = windstorm_2017 %>% 
+  filter(CZ_TYPE == 'C') %>%
+  select(episode_id = EPISODE_ID, event_id = EVENT_ID, 
+         ym = BEGIN_YEARMONTH, day = BEGIN_DAY, state = STATE, county = CZ_NAME, 
+         event_type = EVENT_TYPE) %>% 
+  filter(episode_id == 115177)
+ws_temp %>%
+  select(episode_id, event_id, ym, day, state, county, event_type) %>%
+  head(8) %>%
+  knitr::kable(caption = "Events with `episode_id` 115117") %>%
+  kableExtra::kable_styling("striped")
+```
+
+Here is a heat map for the cumulative number of extreme weather event episodes from 2012 to 2017 in each state. Texas had a total of 3,750 episodes and ranked first among the states. 
+
+```{r, echo = FALSE}
+ws_state_cache = "cache/windstorm_num_episodes_by_state_2012_2017.RData"
+if (!file.exists(ws_state_cache)) {
+  aggr_windstorm_state = function(path) {
+    read.csv(path, stringsAsFactors = FALSE) %>% 
+      # select and rename variables
+      select(ym = BEGIN_YEARMONTH, state = STATE, county = CZ_NAME, 
+             event_type = EVENT_TYPE, episode_id = EPISODE_ID) %>% 
+      # aggregate
+      group_by(state) %>%
+      summarise(num_episodes = n_distinct(episode_id), .groups = "drop")
+  } # aggr_windstorm_state()
+  
+  file_names = paste0("data/", c(
+    "StormEvents_details-ftp_v1.0_d2012_c20200317.csv",
+    "StormEvents_details-ftp_v1.0_d2013_c20170519.csv",
+    "StormEvents_details-ftp_v1.0_d2014_c20210120.csv",
+    "StormEvents_details-ftp_v1.0_d2015_c20191116.csv",
+    "StormEvents_details-ftp_v1.0_d2016_c20190817.csv",
+    "StormEvents_details-ftp_v1.0_d2017_c20210120.csv"
+  ))
+  ws_state = lapply(file_names, aggr_windstorm_state) %>% bind_rows() %>%
+    group_by(state) %>% summarise(num_episodes = sum(num_episodes))
+  save(ws_state, file = ws_state_cache)
+}
+
+load(ws_state_cache)
+```
+
+```{r, fig.width = 6, fig.height = 4, fig.cap = "Cumulative number of extreme weather events (episodes) in each state, 01/2012 - 12/2017"}
+load(file = "cache/usa_map_data.RData")
+mapdata %>% 
+  mutate(state = toupper(id)) %>%
+  left_join(ws_state, by = c("state" = "state")) %>%
+  arrange(order) %>%
+  ggplot() +
+    theme_bw() + 
+    geom_polygon(aes(long, lat, group = group, fill = num_episodes), colour = "grey") +
+    scale_fill_gradient(
+      name = "# of episodes", low = "#FFF5F0", high = "#A50F15", na.value = "#F2F2F2"
+    ) +
+    scale_x_continuous(limits = c(-125, -70)) +
+    coord_map("polyconic") +
+    labs(x = "", y = "")
+```
+
+---
+
+### Reshaping storm event data
+
+Reshaping storm event data is relatively straightforward. We keep the events observed by counties, compute the number of episodes observed in each county in each month from 2012 to 2017. The transformed data look like: 
+
+```{r, echo = FALSE}
+load(file = "data/windstorm_num_episodes_by_county_ym_2012_2017.RData")
+windstorm %>% head() %>%
+  knitr::kable() %>%
+  kableExtra::kable_styling("striped")
+```
+
+---
+
+## Merging windstorm and weather datasets {.tabset .tabset-pills}
+
+Note that the windstorm records are uniquely identified by counties and time (year-month), while the weather data are uniquely identified cities and time. 
+We will be using city-level weather records to represent county-level climate status. To merge the two datasets, we need to match the 27 U.S. cities in the weather dataset to the counties they are in. We do that with the help of the [US Cities Database](https://simplemaps.com/data/us-cities). 
+
+To address this comment on our project proposal: 
+
+>Do you plan to do forecasting or in-time "prediction"? If it's the latter, why it's interesting, as we already know it's happening?
+
+I prepared two merging approaches, one matches the storm events to the weather data in the same month, the other matches storm events to the weather data in the previous month. They both have the same format - 1,674 rows (62 months $\times$ 27 cities) and 17 columns. Take the first version as an example:  
+
+```{r, echo = TRUE}
+load("data/windstorm_weather_same_month.RData")
+data_merged %>% dim
+data_merged %>% colnames
+```
+
+```{r, echo = TRUE, eval = FALSE}
+data_merged %>% head()
+```
+
+```{r, echo = FALSE}
+data_merged %>% select(all_of(colnames(data_merged)[1:10])) %>% head() %>% knitr::kable() %>%
+  kableExtra::kable_styling("striped")
+```
+
+Note that the number of episodes were aggregated on the county level, while the weather records were observed in cities and used as an approximation for county-level weather status. So [the analysis and discussion should be on the county level.]{.hl}
+
+
+We are likely going to look into a classification problem, so we can transform `num_episodes` to a 0-1 variable `event` (0 for no extreme weather events and 1 otherwise). 
+This is a relatively balanced dataset: 
+
+```{r, echo = TRUE}
+data_merged = data_merged %>% mutate(event = ifelse(num_episodes > 0, 1, 0))
+table(data_merged$event)
+```
+
+Here are the scatterplots of `event` (outcome variable) against the weather measurements (potential predictors) created using the two versions of merged data. We can also introduce geographical information (e.g. state) as predictors.
+
+### match windstorm to weather in the same month
+
+```{r, fig.height = 6, fig.width = 8}
+load("data/windstorm_weather_same_month.RData")
+data_merged %>%
+  mutate(event = ifelse(num_episodes > 0, 1, 0)) %>%
+  pivot_longer(cols = -c("ym", "city", "county", "state", "num_episodes", "event"),
+               names_to = "variable", values_to = "value") %>%
+  ggplot() +
+  facet_wrap(~variable, scales = "free_y") +
+  theme_bw() +
+  geom_boxplot(aes(as.factor(event), value)) +
+  labs(x = "event", y = "predictor values")
+```
+
+### match windstorm to weather in the previous month
+
+```{r, fig.height = 6, fig.width = 8}
+load("data/windstorm_weather_prev_month.RData")
+data_merged %>%
+  mutate(event = ifelse(num_episodes > 0, 1, 0)) %>%
+  pivot_longer(cols = -c("ym", "city", "county", "state", "num_episodes", "event"),
+               names_to = "variable", values_to = "value") %>%
+  ggplot() +
+  facet_wrap(~variable, scales = "free_y") +
+  theme_bw() +
+  geom_boxplot(aes(as.factor(event), value)) +
+  labs(x = "event", y = "predictor values")
+```
+
+## {- .unlisted .unnumbered}
+
+---
