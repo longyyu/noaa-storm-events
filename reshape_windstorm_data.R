@@ -3,6 +3,7 @@ ws_file = "data/windstorm_num_episodes_by_county_ym_2012_2017.RData"
 if (!file.exists(ws_file)) {
   read_windstorm_data = function(path) {
     read.csv(path, stringsAsFactors = FALSE) %>% 
+      # look at the events reported by counties (C) rather than forecast zones (Z)
       filter(CZ_TYPE == 'C') %>%
       select(ym = BEGIN_YEARMONTH, state = STATE, county = CZ_NAME, 
              event_type = EVENT_TYPE, episode_id = EPISODE_ID) %>% 
