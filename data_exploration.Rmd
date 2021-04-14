@@ -1,0 +1,99 @@
+---
+title: Project Data Exploration
+subtitle: STATS551, WN21
+author: Yanyu Long
+date: Mar 15, 2021
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  comment = ''
+)
+options(knitr.kable.NA = '') 
+
+library(tidyverse)
+
+plot_roc = function(pred_prob, actual) {
+  
+  get_tpr_fpr = function(threshold) {
+    
+    pred = (pred_prob > threshold) * 1L
+    tp = sum((pred == 1) & (actual == 1), na.rm = TRUE)
+    fn = sum((pred == 0) & (actual == 1), na.rm = TRUE)
+    tn = sum((pred == 0) & (actual == 0), na.rm = TRUE)
+    fp = sum((pred == 1) & (actual == 0), na.rm = TRUE)
+    return(list(tpr = tp / (tp + fn), fpr = fp / (fp + tn)))
+    
+  } # get_tpr_fpr()
+  
+  matrix(unlist(lapply(seq(0, 1, length.out = 100), get_tpr_fpr)), 
+         nrow = 100, byrow = TRUE) %>%
+    data.frame() %>%
+    set_names(c("TPR", "FPR")) %>%
+    ggplot() +
+      theme_bw() +
+      geom_line(aes(FPR, TPR))
+} # plot_roc()
+```
+
+## Historical Weather Dataset on 30 US & Canada cities: 2012-2017
+
+* Data Source: [Kaggle](https://www.kaggle.com/selfishgene/historical-hourly-weather-data). 
+
+```{r}
+folder = "weather"
+city = read.csv(sprintf("%s/%s", folder, "city_attributes.csv"), 
+                stringsAsFactors = FALSE) %>%
+  filter(Country == "United States")
+table(city$Country)
+```
+
+```{r}
+read_weather_data = function(varname) {
+  read.csv(sprintf("%s/%s.csv", folder, varname),
+                    stringsAsFactors = FALSE) %>%
+    mutate(datetime = strptime(datetime, format = "%Y-%m-%d %H:%M:%S")) %>%
+    pivot_longer(-"datetime", names_to = "city", values_to = varname) %>%
+    drop_na()
+} # read_weather_data()
+```
+
+```{r}
+pressure = read_weather_data("pressure")
+
+wind_speed = read_weather_data("wind_speed")
+
+humidity = read_weather_data("humidity")
+
+temperature = read_weather_data("temperature")
+
+wind_direction = read_weather_data("wind_direction")
+```
+
+## Wind storm dataset
+
+```{r}
+# read windstorm data
+windstorm_2017 = read.csv(
+  "./windstorm/StormEvents_details-ftp_v1.0_d2017_c20210120.csv",
+  stringsAsFactors = FALSE
+) %>% 
+  filter(CZ_TYPE == 'C') %>%
+  select(ym = BEGIN_YEARMONTH, day = BEGIN_DAY, state = STATE, county = CZ_NAME, 
+         event_type = EVENT_TYPE, episode_id = EPISODE_ID, event_id = EVENT_ID)
+epi = windstorm_2017 %>% filter(episode_id == 115177)
+nrow(epi)
+range(epi$day)
+table(epi$event_type)
+```
+
+One `episode_id` can correspond to multiple `event_id`s. In 2017, 151 events were recorded under the episode ID `115177`, all of which happened during May 26-28. The episode narrative reads: "Multiple rounds of severe thunderstorms brought damaging straight-line winds, large hail, tornadoes, and flooding to the Missouri Ozarks from May 27th into the early morning hours of May 28th. Over 130 reports of severe weather and flooding were received from the Missouri Ozarks." 
+In the following data analysis, we will use episodes as the unit of extreme weather events. 
