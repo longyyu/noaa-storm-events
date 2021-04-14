@@ -37,25 +37,24 @@ if (!file.exists("data/weather_aggre_ym_city.RData")) {
   df_wind_direction = read_vars("wind_direction")
   df_wind_speed = read_vars("wind_speed")
   
-  # read in temperature -- method 1
+  # read in temperature -- method 2
   df_temp = read_rename_pivot_long("temperature") %>%
-    # convert hourly data to daily min/max values
+    # convert hourly data to (i) daily mean temperature and (ii) diurnal temperature variation
     group_by(date, city) %>%
     summarise_at("temperature", .funs = list(
-      mintemp = ~ min(.x, na.rm = TRUE), 
-      maxtemp = ~ max(.x, na.rm = TRUE)
+      meantemp = ~ mean(.x, na.rm = TRUE),
+      difftemp = ~ (max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE))
     )) %>% ungroup() %>% 
-    mutate_at(c("mintemp", "maxtemp"), .funs = ~ifelse(is.finite(.x), .x, NA)) %>%
-    # compute monthly avg and sd of the daily min/max values
+    mutate_at(c("meantemp", "difftemp"), .funs = ~ifelse(is.finite(.x), .x, NA)) %>%
+    # compute monthly avg and sd of the daily mean temperature and diurnal variation
     mutate(ym = substr(date, 1, 7)) %>%
     group_by(ym, city) %>%
-    summarise_at(c("mintemp", "maxtemp"), .funs = list(
+    summarise_at(c("meantemp", "difftemp"), .funs = list(
       avg = ~ mean(.x, na.rm = TRUE),
       sd = ~ sd(.x, na.rm = TRUE)
     )) %>% ungroup()
   # there may still be NAs at this point, e.g., Miami did not have any records in Nov. 2017
-  # this methods results in highly correlated variables - see the pairwise scatterplot
-      # pairs(~ mintemp_avg + maxtemp_avg + mintemp_sd + maxtemp_sd, data = df_temp)
+  # pairs(~ meantemp_avg + difftemp_avg + meantemp_sd + difftemp_sd, data = df_temp)
   
   # merge all variables' data frames by ym and date
   join_by_vars = c("ym", "city")
@@ -66,9 +65,8 @@ if (!file.exists("data/weather_aggre_ym_city.RData")) {
     left_join(df_wind_speed, by = join_by_vars)
   
   save(weather, file = "data/weather_aggre_ym_city.RData")
-  
-} else {
-  
-  load("data/weather_aggre_ym_city.RData")
-  
+  rm(df_temp, df_humidity, df_pressure, df_wind_direction, df_wind_speed, 
+     join_by_vars, us_cities_27)
 }
+
+load("data/weather_aggre_ym_city.RData")
