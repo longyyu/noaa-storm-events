@@ -2,7 +2,7 @@
 title: Project Data Exploration and Preprocessing
 subtitle: STATS503, WN21
 author: Yanyu Long
-date: Apr 14, 2021
+date: Apr 17, 2021
 output: 
   html_document:
     toc: true
@@ -101,12 +101,18 @@ bind_cols(city1, city2) %>%
   kableExtra::kable_styling("striped", full_width = FALSE)
 ```
 
+
 ```{r, fig.width = 6, fig.height = 4, fig.cap = "27 U.S. Cities"}
 map_cache = "cache/usa_map_data.RData"
 if (!file.exists(map_cache)) {
   library(albersusa) # remotes::install_github("hrbrmstr/albersusa")
-  mapdata  = usa_composite() %>% fortify(us, region = "name")
-  save(mapdata, file = map_cache)
+  mapdata = usa_composite()
+  centroids = rgeos::gCentroid(usa_composite(), byid = TRUE) %>%
+    as.data.frame() %>%
+    mutate(state_abbr = mapdata@data$iso_3166_2,
+           state_name = mapdata@data$name)
+  mapdata = mapdata %>% fortify(us, region = "name")
+  save(centroids, mapdata, file = map_cache)
 }
 load(file = map_cache)
 
@@ -117,6 +123,7 @@ ggplot() +
   scale_x_continuous(limits = c(-125, -70)) +
   coord_map("polyconic") +
   geom_point(data = city, aes(long, lat), color = "darkred", size = 2, alpha = .6) +
+  geom_text(data = centroids, aes(x, y, label = state_abbr), size = 2) +
   labs(x = "", y = "")
 ```
 
@@ -287,6 +294,11 @@ load(ws_state_cache)
 
 ```{r, fig.width = 6, fig.height = 4, fig.cap = "Cumulative number of extreme weather events (episodes) in each state, 01/2012 - 12/2017"}
 load(file = "cache/usa_map_data.RData")
+centroids_20 = centroids %>% 
+  mutate(state_name = toupper(state_name)) %>%
+  left_join(ws_state, by = c("state_name" = "state")) %>% 
+  arrange(-num_episodes) %>% head(20)
+
 mapdata %>% 
   mutate(state = toupper(id)) %>%
   left_join(ws_state, by = c("state" = "state")) %>%
@@ -298,6 +310,7 @@ mapdata %>%
       name = "# of episodes", low = "#FFF5F0", high = "#A50F15", na.value = "#F2F2F2"
     ) +
     scale_x_continuous(limits = c(-125, -70)) +
+    geom_text(data = centroids_20, aes(x, y, label = state_abbr), size = 3) +
     coord_map("polyconic") +
     labs(x = "", y = "")
 ```
@@ -371,6 +384,18 @@ data_merged %>%
   labs(x = "event", y = "predictor values")
 ```
 
+```{r, fig.height = 6, fig.width = 8}
+data_merged %>%
+  mutate(event = ifelse(num_episodes > 0, 1, 0)) %>%
+  pivot_longer(cols = -c("ym", "city", "county", "state", "num_episodes", "event"),
+               names_to = "variable", values_to = "value") %>%
+  ggplot() +
+  facet_wrap(~variable, scales = "free_x") +
+  theme_bw() +
+  geom_point(aes(value, num_episodes)) +
+  labs(x = "predictor values", y = "# of episodes")
+```
+
 ### match windstorm to weather in the previous month
 
 ```{r, fig.height = 6, fig.width = 8}
@@ -384,6 +409,18 @@ data_merged %>%
   theme_bw() +
   geom_boxplot(aes(as.factor(event), value)) +
   labs(x = "event", y = "predictor values")
+```
+
+```{r, fig.height = 6, fig.width = 8}
+data_merged %>%
+  mutate(event = ifelse(num_episodes > 0, 1, 0)) %>%
+  pivot_longer(cols = -c("ym", "city", "county", "state", "num_episodes", "event"),
+               names_to = "variable", values_to = "value") %>%
+  ggplot() +
+  facet_wrap(~variable, scales = "free_x") +
+  theme_bw() +
+  geom_point(aes(value, num_episodes)) +
+  labs(x = "predictor values", y = "# of episodes")
 ```
 
 ## {- .unlisted .unnumbered}
