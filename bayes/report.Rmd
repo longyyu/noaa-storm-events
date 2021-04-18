@@ -1,0 +1,65 @@
+---
+title: "STATS551 Final Project"
+author: "Yanyu Long"
+date: "April 2021"
+output: pdf_document
+header-includes:
+- \usepackage{float}
+- \usepackage{titling}
+- \setlength{\droptitle}{-5em}
+- \usepackage{makecell}
+- \renewenvironment{Shaded} {\begin{snugshade}\footnotesize} {\end{snugshade}}
+documentclass: article
+geometry: margin=0.95in
+fontsize: 12pt
+urlcolor: blue
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  include = TRUE,
+  comment='',
+  fig.align = "center",
+  fig.pos = "H"
+)
+
+library(tidyverse)
+fmt_float = function(float_val) {
+  sprintf("%4.3f", float_val)
+}
+# rm(list = ls()); rmarkdown::render("report.Rmd")
+```
+
+## Introduction
+
+The U.S. experiences a variety of extreme weather events, including hurricanes, floods, blizzards, droughts, and so on, causing severe infrastructure damage and health impacts. Climate change is expected to increase the frequency and intensity of these events. 
+We will look into the trend and patterns of extreme weather events in the U.S. and identify the relation between weather conditions and the occurrences of severe weather phenomena. 
+
+
+## Data
+
+We will be using the Storm Event Data¹, which documents the occurrence of extreme weather events such as thunderstorm wind, flash flood, drought, wildfire, etc. at the county level from 1950 to 2020, as well as the Historical Weather Dataset, which contains hourly observations of pressure, wind speed, humidity, temperature, wind direction, and weather description in 27 U.S. cities (see Figure 1) from 2012 to 2017. Since the data are recorded hourly, there are over 44,000 observations for each city. We plan to transform the data into daily or monthly records as needed. The data gathering and manipulating process will be documented in the final report. 
+
+we will be using city-level weather records to represent county-level climate status. But since weather data are often observed at land surface stations, we will have to use the observations from a limited number of stations to account for a county anyway. Also, the city-level weather dataset provides detailed and multidimensional records of climate summaries, which most available weather datasets do not have. 
+
+
+Variable | Description
+-------- | -----------
+
+
+## Model
+
+## Results
+
+## Conclusions
+
+## Limitations
+
+## References {.unnumbered}
+
+
+
