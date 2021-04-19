@@ -8,7 +8,6 @@ header-includes:
 - \usepackage{titling}
 - \setlength{\droptitle}{-5em}
 - \usepackage{makecell}
-- \renewenvironment{Shaded} {\begin{snugshade}\footnotesize} {\end{snugshade}}
 documentclass: article
 geometry: margin=0.95in
 fontsize: 12pt
@@ -26,40 +25,169 @@ knitr::opts_chunk$set(
   fig.align = "center",
   fig.pos = "H"
 )
-
 library(tidyverse)
 fmt_float = function(float_val) {
   sprintf("%4.3f", float_val)
 }
-# rm(list = ls()); rmarkdown::render("report.Rmd")
+# rm(list = ls()); rmarkdown::render("bayes/report.Rmd")
+```
+
+```{=latex}
+\newcommand\norm{\mathrm{N}}
 ```
 
 ## Introduction
 
-The U.S. experiences a variety of extreme weather events, including hurricanes, floods, blizzards, droughts, and so on, causing severe infrastructure damage and health impacts. Climate change is expected to increase the frequency and intensity of these events. 
-We will look into the trend and patterns of extreme weather events in the U.S. and identify the relation between weather conditions and the occurrences of severe weather phenomena. 
+The U.S. has seen a rapid increase in extreme climatic events in recent years. Extreme weather events, including hurricanes, floods, droughts, blizzards, heat wave, and so on, can often lead to loss of life, severe infrastructure and property damage, and have detrimental effects on agricultural production. From 1980 to 2020, the U.S. has sustained 291 "billion-dollar" weather and climate disasters (i.e., events with losses exceeding $1 billion), with the most recent one being the winter storm and cold wave that impacted many northwest, central and eastern states in February 2021, causing 138 deaths and damage costs of over $10.0 billion. In the most recent 5 years (2016 - 2020) alone, an annual average of 16.2 billion-dollar events were recorded.[@noaa-billion]
+
+Climate change is expected to increase the frequency and intensity of these events. For example, higher temperature can lead to increase in surface evaporation, rapid drying of soils, and the occurrence of severe droughts. Higher sea surface temperature contributes to an increase in Atlantic hurricane activities. 
+We will look into the trend and patterns of extreme climatic events in the U.S. and identify the relation between weather conditions and the occurrences of severe weather phenomena. 
 
 
 ## Data
 
-We will be using the Storm Event Data¹, which documents the occurrence of extreme weather events such as thunderstorm wind, flash flood, drought, wildfire, etc. at the county level from 1950 to 2020, as well as the Historical Weather Dataset, which contains hourly observations of pressure, wind speed, humidity, temperature, wind direction, and weather description in 27 U.S. cities (see Figure 1) from 2012 to 2017. Since the data are recorded hourly, there are over 44,000 observations for each city. We plan to transform the data into daily or monthly records as needed. The data gathering and manipulating process will be documented in the final report. 
+This study uses the Storm Event Database maintained by the National Weather Service (NWS)[@noaa-storm]. This dataset documents the occurrence of extreme weather events such as thunderstorm wind, flash flood, drought, wildfire, etc. at the county level from 1950 to 2020. 
 
-we will be using city-level weather records to represent county-level climate status. But since weather data are often observed at land surface stations, we will have to use the observations from a limited number of stations to account for a county anyway. Also, the city-level weather dataset provides detailed and multidimensional records of climate summaries, which most available weather datasets do not have. 
+For the predictors, it is difficult to obtain weather data aggregated at the county level, so we will look at a city level historical weather dataset from the OpenWeatherMap API[@kaggle-weather]. This dataset contains hourly observations of temperature, humidity, pressure, wind speed, wind direction in 27 U.S. cities (see Figure 1) from 2012 to 2017.  
+
+To match the cities in the weather dataset to the counties in the wind storm dataset, we use the city names and locations information from the United States Cities Database [@us-cities]. Due to the limited scope of the weather dataset, we only look at the time frame of November 2012 to December 2017, and focus on the 27 counties we have weather records for.  
+
+```{r}
+# the US cities dataset - helps match cities to states and counties
+us_cities = read.csv("../data/uscities.csv", stringsAsFactors = FALSE) %>%
+  select(state_id, state = state_name, 
+         county_fips, county = county_name, city, lat, lng) %>% 
+  mutate(city = ifelse(city == "St. Louis", "Saint Louis", city))
+
+# join the 27 cities weather dataset and the US cities dataset by city name, longitude and latitude 
+city = read.csv(sprintf("../data/weather/%s", "city_attributes.csv"), 
+                stringsAsFactors = FALSE) %>% 
+  filter(Country == "United States") %>% 
+  left_join(us_cities, by = c("City" = "city")) %>%
+  # when there are multiple cities with the same names, keep the record with the minimum distance
+  mutate(distance = sqrt((Latitude - lat)^2 + (Longitude - lng)^2)) %>% 
+  group_by(City) %>% filter(distance == min(distance)) %>% ungroup() %>%
+  select(state, county, county_fips, city = City, lat = Latitude, long = Longitude) 
+
+load(file = "../cache/windstorm_num_episodes_by_state_2012_2017.RData")
+load(file = "../cache/usa_map_data.RData")
+# centroids_20 = centroids %>% 
+#   mutate(state_name = toupper(state_name)) %>%
+#   left_join(ws_state, by = c("state_name" = "state")) %>% 
+#   arrange(-num_episodes) %>% head(20)
+```
+
+From the heat map, we do not observe a clear geographic pattern for the frequency of extreme weather events, but it does seem like the occurrences of such events are different in each state. Texas had a total of 3,750 episodes from 2012 to 2017 and ranked first among the states. 
+
+```{r, fig.width = 6.5, fig.height = 4.3, fig.cap = "Cumulative number of extreme weather events (episodes) in each state, 01/2012 - 12/2017"}
+mapdata %>% 
+  mutate(state = toupper(id)) %>%
+  left_join(ws_state, by = c("state" = "state")) %>%
+  arrange(order) %>%
+  ggplot() +
+    theme_bw() + 
+    geom_polygon(aes(long, lat, group = group, fill = num_episodes), 
+                 colour = "grey", size = 0.1) +
+    scale_fill_gradient(
+      name = "# of episodes", low = "#FFF5F0", high = "#A50F15",
+      na.value = "#F2F2F2"
+    ) +
+    scale_x_continuous(limits = c(-125, -68)) +
+    # geom_text(data = centroids_20, aes(x, y, label = state_abbr), size = 2) +
+    geom_point(data = city, aes(long, lat, color = "27 cities with\nweather data"), size = 1.5, alpha = .6) +
+    scale_color_manual(name = "", values = "Darkred") +
+    coord_map("polyconic") +
+    labs(x = "", y = "") +
+    theme(legend.title = element_text(size = 10),
+          legend.box.margin = margin(0, 0, -0.5, 0, unit = "cm"),
+          legend.key.width = unit(.5, "cm"))
+```
+
 
 
 Variable | Description
 -------- | -----------
+`num_episodes` | the number of extreme weather episodes observed in a county in a given year-month
+`event` | a 0-1 variable that equals 1 when `num_episodes`>0, and 0 otherwise
+`meantemp_avg`, `meantemp_sd` | the monthly average / standard deviation of daily mean temperature (Kelvins)
+`difftemp_avg`, `difftemp_sd` | the monthly average / standard deviation of diurnal temperature variation (the difference between the max and min temperature within a day, Kelvins)
+`humidity_avg`, `humidity_sd | the monthly average / standard deviation of daily mean humidity (%)
+`pressure_avg`, `pressure_sd` | the monthly average / standard deviation of daily mean atmospheric pressure (hPa)
+`wind_speed_avg`, `wind_speed_sd` | the monthly average / standard deviation of daily mean wind speed (meter/sec)
+`state` | names of the states that the counties are in
+
+
+From the boxplots of the weather measurements against the outcome variable, several variables might help predict the occurrence of extreme weather events, especially the temperature and wind speed measurements. From the previous analysis we see that certain states are more likely to experience such events. 
+
+```{r, fig.height = 6, fig.width = 8, eval = FALSE}
+load("data/windstorm_weather_prev_month.RData")
+data_merged = data_merged %>% select(-starts_with("wind_direction"))
+data_merged %>%
+  mutate(event = ifelse(num_episodes > 0, 1, 0)) %>%
+  pivot_longer(cols = -c("ym", "city", "county", "state", "num_episodes", "event"),
+               names_to = "variable", values_to = "value") %>%
+  ggplot() +
+  facet_wrap(~variable, scales = "free_y", nrow = 2) +
+  theme_bw() +
+  geom_boxplot(aes(as.factor(event), value)) +
+  labs(x = "event", y = "predictor values")
+```
 
 
 ## Model
 
+This study aims to predict the occurrences of extreme weather events with weather observations. We use a Bayesian logistic regression to predict the probability of having extreme weather events in a month using weather measurements. 
+
+In the exploratory data analysis section, we see that the location (states) seems to have an influence on the probability of having extreme weather events. Furthermore, the number of episodes in each year can vary significantly. Therefore, we assume that the likelihood of extreme climatic events fluctuate from year to year, and assume that such fluctuations are random and independent. We denote the fluctuations as $\alpha_{yr}, \ yr\in \{2012, \ldots, 2017\}$. Similarly, we take geographical information into account by assuming a random, independent regional shift in the probability of extreme weather events $\alpha_{st},\ st \in \{1, \ldots, 20\}$. 
+
+```{r, eval = FALSE}
+load(file = "../data/windstorm_num_episodes_by_county_ym_2012_2017.RData")
+windstorm %>% 
+  mutate(year = round(ym/100)) %>%
+  filter(state %in% c("TEXAS", "KANSAS", "KENTUCKY", "MISSOURI", "GEORGIA", 
+                      "NORTH CAROLINA", "IOWA", "ILLINOIS", "VIRGINIA")) %>%
+  group_by(state, year) %>%
+  summarise(num_episodes = sum(num_episodes)) %>%
+  ggplot(aes(year, num_episodes, color = state)) +
+  theme_bw() +
+  geom_line()
+```
+
+\[
+\begin{aligned}
+&Y_i | \rho_i \sim \mathrm{Bernoulli}(\rho_i) \\
+&\rho_i | \eta_i = \mathrm{inv-logit}(\eta_i) = \frac{1}{1+e^{-\eta_i}} \\
+&\eta_{i,j,t} = \alpha + \alpha_{yr,t} + \alpha_{st, j}+ X_i \beta \\
+&\alpha \sim \norm(0, 5) \\
+&\alpha_{yr} \sim \norm(0, 2.5),\ \ yr\in \{2012, \ldots, 2017\} \\
+&\alpha_{st} \sim \norm(0, 2.5),\ \ st \in \{1, \ldots, 20\}\\
+&\beta \sim \norm(0, 2.5) 
+\end{aligned}
+\]
+
+We use a Markov Chain Monte Carlo method to simulate the posterior probability distribution and the posterior predictive distribution.
+
 ## Results
+
+From the trace plot, we see that the model converged well and the four chains are well-mixed. 
+
+Effective sample size are well above ...
+Rhat is 1 ...
+
+The confidence interval for ... does not contain 0. 
+
 
 ## Conclusions
 
 ## Limitations
 
+In terms of data, this study uses city-level weather records to represent county-level climate status.  If we can gather weather data from multiple land surface stations in the counties of interest, we may be able to generate more accurate predictions. 
+
+In terms of modeling process, this study accounts for regional fluctuations by including a state-level random effect. This method is not ideal, as a lot of the introduced parameters are estimated to be insignificant. It is worth exploring what factors lead to the massive difference in the frequencies of extreme weather events, and using more precise measurements to account for the geographical influence. 
+
 ## References {.unnumbered}
 
+## Appendix {.unnumbered}
 
+### Data preprocessing
 
