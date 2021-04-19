@@ -30,7 +30,7 @@ compute_ber = function(yhat, ytrue) {
 load("data/windstorm_weather_prev_month.RData")
 data_merged = data_merged %>%
   mutate(outcome = ifelse(num_episodes > 0, 1, 0)) %>% 
-  select(-ym, -city, -county, -num_episodes) %>%
+  select(-city, -county, -num_episodes) %>%
   drop_na()
 
 data_x = data_merged %>% 
@@ -38,7 +38,8 @@ data_x = data_merged %>%
          wind_speed_avg, wind_speed_sd) %>% 
   as.matrix() %>% scale()
 K = ncol(data_x)
-states = as.factor(data_merged$state) # levels(states)
+states = as.factor(data_merged$state)
+years = as.factor(substr(data_merged$ym, 1, 4))
 
 # the hierarchical logistic model ---------------------------------------------
 
@@ -46,13 +47,17 @@ stan_data_hier = list(
   N = nrow(data_x),
   K = K,
   G = length(levels(states)),
+  Yr = length(levels(years)),
   y = data_merged$outcome,
   X = data_x,
   group = as.numeric(states),
+  year = as.numeric(years),
   alpha_mean = 0,
-  alpha_s2 = 10,
-  a_mean = 0,
-  a_s2 = 5,
+  alpha_s2 = 5,
+  alpha_st_mean = 0,
+  alpha_st_s2 = 2.5,
+  alpha_yr_mean = 0,
+  alpha_yr_s2 = 2.5,
   beta_mean = rep(0, K),
   beta_s2 = rep(2.5, K)
 )
@@ -61,8 +66,8 @@ stan_data_hier = list(
 if (dir("bayes/", pattern = EXPORT_FILE_HIER) %>% length() == 0) {
   # only re-fit the model when EXPORT_FILEs are not found
   fit_logit_hier = stan(
-    "bayes/logit_hierarchical.stan", data = stan_data_hier, 
-    pars = c("alpha", "a", "beta", "y_rep", "rho"), # not saving eta
+    "bayes/logit_hier_a.stan", data = stan_data_hier, 
+    pars = c("alpha", "alpha_st", "alpha_yr", "beta", "y_rep", "rho"), # not saving eta
     warmup = N_WARMUP, iter = N_ITER, refresh = 1000, cores = N_CORE,
     sample_file = sprintf("bayes/%s.csv", EXPORT_FILE_HIER)
   )
@@ -75,20 +80,20 @@ system.time({ # 30sec
 })
 
 # Results --------------
-traceplot(fit_logit_hier, c("alpha", "beta"), inc_warmup = TRUE)
-traceplot(fit_logit_hier, c("a"), inc_warmup = TRUE)
+traceplot(fit_logit_hier, c("beta"), inc_warmup = TRUE)
+traceplot(fit_logit_hier, c("alpha", "alpha_st", "alpha_yr"), inc_warmup = TRUE)
 
-fit_summary = summary(fit_logit_hier, pars = c("alpha", "beta"), probs = c(0.025, 0.975))$summary
+fit_summary = summary(fit_logit_hier, pars = c("beta"), probs = c(0.025, 0.975))$summary
 fit_summary # %>% knitr::kable(digits = 3)
 
-fit_summary = summary(fit_logit_hier, pars = c("a"), probs = c(0.025, 0.975))$summary
+fit_summary = summary(fit_logit_hier, pars = c("alpha", "alpha_st", "alpha_yr"), probs = c(0.025, 0.975))$summary
 fit_summary # %>% knitr::kable(digits = 3)
 
-plot(fit_logit, pars = c("alpha", "beta"))
+plot(fit_logit_hier, pars = c("alpha", "beta"))
 library(bayesplot)
 color_scheme_set("blue")
-mcmc_intervals(as.matrix(fit_logit, pars = c("alpha", "beta")), prob = 0.95)
-ppc_dens_overlay(stan_data$y, as.matrix(fit_logit, pars = "y_rep")[1:150,])
+mcmc_intervals(as.matrix(fit_logit_hier, pars = c("alpha", "beta")), prob = 0.95)
+ppc_dens_overlay(stan_data$y, as.matrix(fit_logit_hier, pars = "y_rep")[1:150,])
 
 
 # the basic logistic model ----------------------------------------------------
