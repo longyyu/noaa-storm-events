@@ -1,0 +1,169 @@
+---
+title: "Temporal projection of natural atmospheric events in the United States Regions"
+author: "Haejeong Choi, Yanyu Long, Seung Ho Woo"
+date: "April 2021"
+output: 
+  pdf_document:
+    keep_tex: true
+    number_sections: true
+header-includes:
+- \usepackage{float}
+- \usepackage{titling}
+- \setlength{\droptitle}{-5em}
+- \usepackage{makecell}
+- \usepackage{booktabs}
+documentclass: article
+geometry: margin=0.95in
+fontsize: 12pt
+urlcolor: blue
+bibliography: references.bib
+csl: chicago-author-date-16th-edition.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  include = TRUE,
+  comment='',
+  fig.align = "center",
+  fig.pos = "H"
+)
+library(tidyverse)
+fmt_float = function(float_val) {
+  sprintf("%4.3f", float_val)
+}
+# rm(list = ls()); rmarkdown::render("report_503.Rmd")
+```
+
+```{=latex}
+\newcommand\norm{\mathrm{N}}
+```
+
+# Introduction
+
+The U.S. has seen a rapid increase in extreme climatic events in recent years. Extreme weather events, including hurricanes, floods, droughts, blizzards, heat wave, and so on, can often lead to loss of life, severe infrastructure and property damage, and have detrimental effects on agricultural production. 
+The number of extreme weather and climate disasters in U.S. with losses exceeding $1 billion hit a record high in 2020 - there were 22 such events, causing damage of over $95.8 billion[@noaa-billion]. The most recent billion-dollar event was the Winter Storm Uri in February 2021. This event alone caused at least 136 deaths and damage of over $195 billion[@enwiki:1019729582].
+
+Climate change is expected to increase the frequency and intensity of these events. For example, higher temperature can lead to increase in surface evaporation, rapid drying of soils, and the occurrence of severe droughts[@briffa2009wet; @cai2009rising]. Higher sea surface temperature contributes to an increase in Atlantic hurricane activities.  
+
+This study [TODO: add things here]
+
+# Data
+
+## Data Preprocessing
+
+This study uses the Storm Event Database maintained by the National Weather Service [@noaa-storm]. This dataset documents the occurrence of extreme weather events such as thunderstorm wind, flash flood, drought, wildfire, etc. at the county level from 1950 to 2020. 
+
+For the predictors, it is difficult to obtain weather data aggregated at the county level, so we will look at a city level historical weather dataset from the OpenWeatherMap API[@kaggle-weather]. This dataset contains hourly observations of temperature, humidity, pressure, wind speed, and wind direction in 27 U.S. cities (see Figure 1) from 2012 to 2017. To reduce the dimensionality and impute the missing values, we extract monthly summary statistics from the hourly data by first computing daily average values of the observed variables, then computing the monthly average and standard deviation of the daily records. 
+
+To match the cities in the weather dataset to the counties in the wind storm dataset, we use the city names and locations information from the United States Cities Database [@us-cities]. Due to the limited scope of the weather dataset, we only look at the time frame of November 2012 to December 2017, and focus on the 27 counties we have weather records for. We match the extreme weather event records to the weather data in the previous month, allowing the model to forecast future events with observed weather measurements. 
+
+
+```{r}
+# the US cities dataset - helps match cities to states and counties
+us_cities = read.csv("data/uscities.csv", stringsAsFactors = FALSE) %>%
+  select(state_id, state = state_name, 
+         county_fips, county = county_name, city, lat, lng) %>% 
+  mutate(city = ifelse(city == "St. Louis", "Saint Louis", city))
+
+# join the 27 cities weather dataset and the US cities dataset by city name, longitude and latitude 
+city = read.csv(sprintf("data/weather/%s", "city_attributes.csv"), 
+                stringsAsFactors = FALSE) %>% 
+  filter(Country == "United States") %>% 
+  left_join(us_cities, by = c("City" = "city")) %>%
+  # when there are multiple cities with the same names, keep the record with the minimum distance
+  mutate(distance = sqrt((Latitude - lat)^2 + (Longitude - lng)^2)) %>% 
+  group_by(City) %>% filter(distance == min(distance)) %>% ungroup() %>%
+  select(state, county, county_fips, city = City, lat = Latitude, long = Longitude) 
+
+load(file = "cache/windstorm_num_episodes_by_state_2012_2017.RData")
+load(file = "cache/usa_map_data.RData")
+# centroids_20 = centroids %>% 
+#   mutate(state_name = toupper(state_name)) %>%
+#   left_join(ws_state, by = c("state_name" = "state")) %>% 
+#   arrange(-num_episodes) %>% head(20)
+```
+
+```{r}
+tibble(
+  Variable = c("event", "meantemp_avg", "humidity_avg", 
+               "pressure_avg", "wind_speed_avg", "state"),
+  Description = c(
+    # "the number of extreme weather episodes observed in a county in a given year-month",
+    "the outcome variable, equals 1 when num_episodes>0, and 0 otherwise", 
+    "the monthly average of daily mean temperature (Kelvins)", 
+    "the monthly average of daily mean humidity (%)",
+    "the monthly average of daily mean atmospheric pressure (hPa)",
+    "the monthly average of daily mean wind speed (meter/sec)",
+    "names of the states that the counties are in"
+  )
+) %>% 
+  knitr::kable(format = "latex", booktabs = TRUE, 
+               caption = "Descriptions of variables used in the modeling process") %>%
+  kableExtra::row_spec(row = 0, bold = TRUE, align = 'c')
+```
+
+## Exploratory Data Analysis  
+
+From the heat map, we can see that the probability of encountering severe weather events are different in each state. Texas had a total of 3,750 episodes from 2012 to 2017 and ranked first among all states. Texas experiences multiple types of weather conditions - the western one-third of the state suffers from cold winters and low humidity, the eastern two-thirds experiences sub-tropical weather, and the Trans-Pecos region is the driest area of the state. The state sustains frequent thunderstorms which can lead to damaging hails and flash flooding, and all of Texas is susceptible to drought induced by the intense summer heat and the lack of rain [@molly2021what]. 
+We will introduce the state as a predictor to account for the geographical factors affecting the probability of having extreme weather events other than weather conditions. 
+
+```{r, fig.width = 6, fig.height = 4, fig.cap = "Cumulative number of extreme weather events (episodes) in each state, 01/2012 - 12/2017"}
+mapdata %>% 
+  mutate(state = toupper(id)) %>%
+  left_join(ws_state, by = c("state" = "state")) %>%
+  arrange(order) %>%
+  ggplot() +
+    theme_bw() + 
+    geom_polygon(aes(long, lat, group = group, fill = num_episodes), 
+                 colour = "grey", size = 0.1) +
+    scale_fill_gradient(
+      name = "# of episodes", low = "#FFF5F0", high = "#A50F15",
+      na.value = "#F2F2F2"
+    ) +
+    scale_x_continuous(limits = c(-125, -68)) +
+    # geom_point(data = city, aes(long, lat, color = "27 cities with\nweather data"), size = 1.3) +
+    # scale_color_manual(name = "", values = "orange") +
+    coord_map("polyconic") +
+    labs(x = "", y = "") +
+    theme(legend.title = element_text(size = 10),
+          legend.box.margin = margin(0, 0, -0.5, 0, unit = "cm"),
+          legend.key.width = unit(.5, "cm"))
+```
+
+From the boxplots of the weather measurements against the outcome variable, we can see that several variables might help predict the occurrence of extreme weather events, especially the temperature and wind speed measurements. The pressure measurements have a lot of outliers, which is why we will exclude them from the modeling process. Also, we notice that the covariates have different ranges, so we perform a data standardization before building the models. 
+
+```{r, fig.height = 6, fig.width = 7, fig.cap = "Density plots and pair-wise scatterplots of the predictors"}
+load("data/windstorm_weather_prev_month.RData")
+data_merged = data_merged %>% select(-ends_with(c("sd"))) %>%
+  mutate(event = ifelse(num_episodes > 0, 1, 0))
+
+data_merged %>% select(event, ends_with("avg")) %>% 
+  rename_with(.fn = function(x) str_replace(x, "_avg", "")) %>%
+  mutate(event = as.factor(event)) %>%
+  GGally::ggpairs(axisLabels = 'none',
+    lower = list(
+      continuous = GGally::wrap(
+        "points", alpha = .6, size = .9,
+        color = ifelse(data_merged$event == 1, "#A50F15", "grey70")),
+      combo = GGally::wrap("box_no_facet", width = .6)
+    ),
+    diag = list(discrete = GGally::wrap("barDiag", width = .6))
+  ) +
+  theme_bw() + theme(strip.text = element_text(size = 11))
+```
+
+
+# Model
+
+# Conclusions
+
+# Limitations
+
+# References {-}
+
+<div id="refs"></div>
+
+# Appendix {-} 
