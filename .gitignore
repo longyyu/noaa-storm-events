@@ -5,4 +5,7 @@
 data/StormEvents_details*.csv
 cache/
 noaa-storm-events.Rproj
+report_503_files/*
+bayes/report_files
+temp*
 
