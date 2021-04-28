@@ -181,25 +181,98 @@ knitr::include_graphics("cache/eda_heatmap.png")
 
 # Methodology
 
-# Results
+## Research Approach
+This project aims to identify the best-performing classification algorithms and the most important indicators that help forecast future extreme weather events. Therefore, we would want to compare multiple classification methods that excel at either interpretability or predictive power. We will consider the following algorithms: Naive Bayes, Nearest Neighbors, Decision Tree, AdaBoost, Random Forest, Support Vector Machine (SVM) with a Radial Basis Function (RBF) kernel,  Neural Networks, and Gaussian Process Classifier. For each algorithm, we tune the parameters using cross validation, and evaluate the performance on the test set using the following metrics: (1) $\text{Accuracy} = (TP+TN)/(TP+FP+FN+TN)$; (2) $\text{Balanced Error Rate (BER)} =  0.5(FP/(TN+FP) + FN/(FN+TP))$; and (3) the area under the receiver operating characteristic curve (AUC). The accuracy and BER will evaluate the predicted labels, while the AUC can evaluate the predicted probabilities. 
 
-(This is just a place holder. TODO: update this table!)
+## Preliminary Screening
+Since there are too many available classification methods to be considered, and we have inferred from the EDA that certain types of classifiers might work better on this dataset than others (i.e., those with nonlinear decision boundaries or allow variable interactions), we would not want to tune parameters for all of them. 
+Instead, we will perform a preliminary screening by evaluating the model performance using the untuned parameters, and only tune the parameters for the set of algorithms that look most promising. 
+As the Table \@ref(tab:all-method-metrics) show, the Gaussian Process Classifier, RBF-SVM, and Random Forest have much better accuracy, BER, and AUC than other competing methods. Thus, we will focus on these three classification methods to tune the parameters and evaluate their performance.  
 
-```{r}
+
+```{r all-method-metrics}
 tribble(
-  ~Classifier, ~`Test Accuracy`, ~BER, ~AUC,
-  "Gaussian Process Classifier",  "68.11%", "", "",
-  "RBF-Support Vector Machine",   "66.43%", "", "",
-  "Random Forest",   "65.95%", "", "",
-  "Neural Network", "64.75%", "", "",
-  "Nearest Neighbors", "64.51%", "", "",
-  "Naive Bayes", "63.55%", "", "",
-  "AdaBoost", "63.31%", "", "",
-  "Decision Tree", "62.35%", "", "",
-  "Linear Support Vector Machine", "60.43%", "", ""
+  ~Classifier, ~Accuracy, ~BER, ~AUC,
+  "Gaussian Process Classifier",  "68.11%", "0.3277", "0.7078",
+  "RBF-Support Vector Machine",   "66.43%", "0.3425", "0.7102",
+  "Random Forest",   "65.95%", "0.3281", "0.7230",
+  "Neural Network", "64.75%", "0.3828", "0.6405",
+  "Nearest Neighbors", "64.51%", "0.3658", "0.6808",
+  "Naive Bayes", "63.55%", "0.4113", "0.6266",
+  "AdaBoost", "63.31%", "0.3788", "0.6905",
+  "Decision Tree", "62.35%", "0.3619", "0.6489"
+  # "Linear Support Vector Machine", "60.43%", "", ""
 ) %>% 
   knitr::kable(format = "latex", booktabs = TRUE, align = "lc",
-               caption = "Performance of different classification algorithms") %>%
+               caption = "Accuracy, BER, and AUC of different classification algorithms") %>%
+  kableExtra::row_spec(row = 0, bold = TRUE, align = 'c') %>%
+  kableExtra::kable_styling(latex_options = c("HOLD_position"))
+```
+
+## Hyperparameter optimization
+
+#### Random Forest {-}
+
+The Random Forest is an ensemble algorithm that builds multiple base classifiers (in our case, decision trees) and combines them together for more stable predictions. It enables uncorrelated models to operate together and head in the correct direction since the majority of them would make the right decisions even if some are wrong. 
+
+#### SVM {-}
+
+Using the Support Vector Machines, the most important parameter to tune is the kernel. Some of the commonly used nonlinear kernels are polynomial, radial basis, and Sigmoid function kernels. We would expect a polynomial or radial basis kernel to perform better as they allow more flexible decision boundaries. 
+
+#### Gaussian Process Classifier {-}
+
+The Gaussian Process Classifier is based on a Bayesian methodology. It assumes some prior distribution on the underlying probability densities that guarantee some smoothness properties. As a probabilistic method, it allows us to compute empirical confidence intervals and decide if one should refit the prediction in some region of interest. The final classification is then determined as the one that provides a good fit for the observed data, while at the same time guaranteeing certain level of smoothness. To train a GP classifier, we need to specify a kernel function which describes the covariance of the prior distribution. 
+
+
+
+# Results
+
+We use the Python Machine Learning Library `scikit-learn` to implement the models and tune the hyperparameters [@scikit-learn]. 
+
+#### Random Forest {-}
+
+With a randomized grid search, we found the the following setting performs the best: training 800 base classifiers with a maximum depth of 40, considering $\sqrt{p}$ features in each split where $p$ is the total number of features, splitting an internal node only when there are at least 15 samples in the current node and at least 2 samples in each of the left and right branches, and using the Gini index as the impurity criterion.  
+
+Using the tuned Random Forest classifier, the accuracy on our training data set and test set are 91.87% and 69.06%, respectively. As we can see from the receiver operating characteristic curve (ROC) (Figure \@ref(fig:roc-all)) and the confusion matrix (Table \@ref(tab:conf-mat-all)), the AUC reaches 0.7230 and the BER is 0.3281. The Random Forest classifier seems to work well in terms of accuracy and AUC, but it makes a lot of type II errors and thus cannot identify weather conditions that will lead to severe weather events, which is against the goal of our study. 
+
+```{r roc-conf-mat-rf, fig.show = "hold", out.width = "48%", eval = FALSE}
+knitr::include_graphics("cache/results_roc_rf.png")
+knitr::include_graphics("cache/results_conf_mat_rf.png")
+```
+
+The Random Forest classifier has better interpretability than the other two models, as it allows us to compare the importance of features (Figure \@ref(fig:feature-imp)). [TODO: add more analysis]
+
+```{r feature-imp, out.width = "60%", fig.cap = "Relative influence plot of the features"}
+knitr::include_graphics("cache/results_feature_importance_rf.png")
+```
+
+#### SVM {-}
+
+The best performance is given by an RBF kernel SVM with $\gamma=1$ and $C=5$. The parameter $\gamma$ defines how far the influence of a single training example reaches, and $C$ is the coefficient for the penalty term, determines how much error is bearable and controls the bias-variance trade-off. We have relatively low $\gamma$ and $C$ values, which means that we give less weight to the training data and our model will have a simpler decision function with a larger margin.  
+
+The tuned SVM model gives a training-set accuracy of 73.92%, a test accuracy of 66.19%, an AUC of 0.7102 and a BER of 0.3425. It is less satisfactory than the Random Forest in terms of accuracy, AUC and BER, but it also makes less type II errors. 
+
+
+#### Gaussian Process Classifier {-}
+
+Of the available kernel functions, we find that an RBF kernel works best for this dataset. Since the Gaussian Process Classifier is a Bayesian method, the rest of the hyperparameters are optimized during fitting. 
+
+The tuned GP classifier gives a training-set accuracy of 73.68%, test accuracy of 68.11%, AUC of 0.7078 and BER of 0.3277. We choose this model as the optimal classifier as it has fairly good accuracy, AUC, and BER and it classified both true 0 and 1 samples well. 
+
+
+```{r roc-all, out.width = "60%", fig.cap = "Receiver operating characteristic curves of the three algorithms with tuned hyperparameters"}
+knitr::include_graphics("cache/results_roc_3models.png")
+```
+
+```{r conf-mat-all}
+tribble(
+  ~Model, ~TN, ~FP, ~FN, ~TP,
+  "Random Forest", 192, 60, 69, 96,
+  "RBF-SVM", 171, 81, 60, 105,
+  "Gaussian Process", 180, 72, 61, 104
+) %>% 
+  knitr::kable(format = "latex", booktabs = TRUE, 
+               caption = "Confusion matrix of the three algorithms with tuned hyperparameters") %>%
   kableExtra::row_spec(row = 0, bold = TRUE, align = 'c') %>%
   kableExtra::kable_styling(latex_options = c("HOLD_position"))
 ```
