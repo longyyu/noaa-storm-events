@@ -16,8 +16,8 @@ header-includes:
 - \usepackage{makecell}
 - \usepackage{booktabs}
 documentclass: article
-geometry: left=0.85in,right=0.85in,top=0.85in,bottom=0.75in
-fontsize: 11pt
+geometry: margin=0.9in
+fontsize: 12pt
 urlcolor: blue
 bibliography: references.bib
 csl: chicago-author-date-16th-edition.csl
@@ -118,13 +118,8 @@ tibble(
 ## Exploratory Data Analysis  
 
 To look into the relationship between the predictors and outcome variable, we will perform some descriptive data analysis. 
-From the pairwise scatterplots between the predictors (Figure \@ref(fig:ggpairs)), we do not observe highly correlated features, except that the average diurnal temperature variation (`difftemp`) and the humidity have a slightly worrying but still acceptable correlation coefficient of 0.746. 
+From the pairwise scatterplots between the predictors (Figure \@ref(fig:ggpairs)), we do not observe highly correlated features, except that the average diurnal temperature variation (`difftemp_avg`) and the humidity have a slightly worrying but still acceptable correlation coefficient of 0.746. 
 From the boxplots of the weather measurements against the outcome variable, we can see that higher temperature is positively associated with the probability of having extreme weather events. It seems that our research question will likely require a complicated model that allows for nonlinear decision boundaries and/or interactions between predictors, so we would expect algorithms like nonlinear Support Vector Machines (SVM) and tree-based ensemble methods to work better on this dataset.
-
-
-From Figure \@ref(fig:heatmap), we can see that the probability of encountering severe weather events are different in each state. Texas had a total of 3,750 episodes from 2012 to 2017 and ranked first among all states. Texas experiences multiple types of weather conditions - the western one-third of the state suffers from cold winters and low humidity, while the eastern two-thirds experiences sub-tropical weather. The state sustains frequent thunderstorms which can lead to damaging hails and flash flooding, and all of Texas is susceptible to drought induced by the intense summer heat and the lack of rain [@molly2021what]. 
-We will introduce the state as a predictor to account for the geographical factors affecting the probability of having extreme weather events other than weather conditions. 
-
 
 ```{r, eval = FALSE}
 load("data/windstorm_weather_prev_month.RData")
@@ -147,10 +142,12 @@ data_merged %>% select(event, ends_with("avg")) %>%
 ggsave("cache/eda_pairwise_scatter.png", width = 6.5, height = 5.5, dpi = 240)
 ```
 
-```{r ggpairs, fig.height = 6, fig.cap = "Density plots, pairwise scatterplots, and boxplots of the predictors (Red points: event = 1, grey points: event = 0)"}
+```{r ggpairs, fig.height = 7, fig.cap = "Density plots, pairwise scatterplots, and boxplots of the predictors (Red points: event = 1, grey points: event = 0)"}
 knitr::include_graphics("cache/eda_pairwise_scatter.png")
 ```
 
+From Figure \@ref(fig:heatmap), we can see that the probability of encountering severe weather events are different in each state. Texas had a total of 3,750 episodes from 2012 to 2017 and ranked first among all states. Texas experiences multiple types of weather conditions - the western one-third of the state suffers from cold winters and low humidity, while the eastern two-thirds experiences sub-tropical weather. The state sustains frequent thunderstorms which can lead to damaging hails and flash flooding, and all of Texas is susceptible to drought induced by the intense summer heat and the lack of rain [@molly2021what]. 
+We will introduce the state as a predictor to account for the geographical factors affecting the probability of having extreme weather events other than weather conditions.
 
 ```{r, fig.width = 5, fig.height = 2.3, fig.cap = "Cumulative number of extreme weather events (episodes) in each state, 01/2012 - 12/2017", eval = FALSE}
 mapdata %>% 
@@ -182,22 +179,22 @@ knitr::include_graphics("cache/eda_heatmap.png")
 # Methodology
 
 ## Research Approach
-This project aims to identify the best-performing classification algorithms and the most important indicators that help forecast future extreme weather events. Therefore, we would want to compare multiple classification methods that excel at either interpretability or predictive power. We will consider the following algorithms: Naive Bayes, Nearest Neighbors, Decision Tree, AdaBoost, Random Forest, Support Vector Machine (SVM) with a Radial Basis Function (RBF) kernel,  Neural Networks, and Gaussian Process Classifier. For each algorithm, we tune the parameters using cross validation, and evaluate the performance on the test set using the following metrics: (1) $\text{Accuracy} = (TP+TN)/(TP+FP+FN+TN)$; (2) $\text{Balanced Error Rate (BER)} =  0.5(FP/(TN+FP) + FN/(FN+TP))$; and (3) the area under the receiver operating characteristic curve (AUC). The accuracy and BER will evaluate the predicted labels, while the AUC can evaluate the predicted probabilities. 
+This project aims to identify the best-performing classification algorithms and the most important indicators that help forecast future extreme weather events. Therefore, we would want to compare multiple classification methods that excel at either interpretability or predictive power. We will consider the following algorithms: Naive Bayes, K-Nearest Neighbors, Decision Tree, AdaBoost, Random Forest, Support Vector Machine (SVM),  Neural Networks, and Gaussian Process Classifier. For each algorithm, we tune the parameters using cross validation, and evaluate the performance on the test set using the following metrics: (1) $\text{Accuracy} = (TP+TN)/(TP+FP+FN+TN)$; (2) $\text{Balanced Error Rate (BER)} =  0.5(FP/(TN+FP) + FN/(FN+TP))$; and (3) the area under the receiver operating characteristic curve (AUC). The accuracy and BER will be used to evaluate the predicted labels, while the AUC can evaluate the predicted probabilities. 
 
 ## Preliminary Screening
-Since there are too many available classification methods to be considered, and we have inferred from the EDA that certain types of classifiers might work better on this dataset than others (i.e., those with nonlinear decision boundaries or allow variable interactions), we would not want to tune parameters for all of them. 
-Instead, we will perform a preliminary screening by evaluating the model performance using the untuned parameters, and only tune the parameters for the set of algorithms that look most promising. 
-As the Table \@ref(tab:all-method-metrics) show, the Gaussian Process Classifier, RBF-SVM, and Random Forest have much better accuracy, BER, and AUC than other competing methods. Thus, we will focus on these three classification methods to tune the parameters and evaluate their performance.  
+Since there are many available classification methods to be considered, and we have inferred from the EDA that certain types of classifiers might work better on this dataset than others (i.e., those with nonlinear decision boundaries or allow variable interactions), we would not want to tune parameters for all of them. 
+Instead, we will perform a preliminary screening by evaluating the model performance using the untuned parameters, and only tune the parameters for the set of algorithms that look promising. 
+As Table \@ref(tab:all-method-metrics) shows, the Gaussian Process Classifier, SVM with a Radial Basis Function (RBF) kernel, and Random Forest have much better accuracy, BER, and AUC than other competing methods. Thus, we will focus on these three classification methods to tune the parameters and evaluate their performance.  
 
 
 ```{r all-method-metrics}
 tribble(
   ~Classifier, ~Accuracy, ~BER, ~AUC,
   "Gaussian Process Classifier",  "68.11%", "0.3277", "0.7078",
-  "RBF-Support Vector Machine",   "66.43%", "0.3425", "0.7102",
+  "Support Vector Machine (Radial Kernel)",   "66.43%", "0.3425", "0.7102",
   "Random Forest",   "65.95%", "0.3281", "0.7230",
   "Neural Network", "64.75%", "0.3828", "0.6405",
-  "Nearest Neighbors", "64.51%", "0.3658", "0.6808",
+  "K-Nearest Neighbors", "64.51%", "0.3658", "0.6808",
   "Naive Bayes", "63.55%", "0.4113", "0.6266",
   "AdaBoost", "63.31%", "0.3788", "0.6905",
   "Decision Tree", "62.35%", "0.3619", "0.6489"
@@ -213,11 +210,11 @@ tribble(
 
 #### Random Forest {-}
 
-The Random Forest is an ensemble algorithm that builds multiple base classifiers (in our case, decision trees) and combines them together for more stable predictions. It enables uncorrelated models to operate together and head in the correct direction since the majority of them would make the right decisions even if some are wrong. 
+The Random Forest is an ensemble algorithm that builds multiple base classifiers (in our case, decision trees) in parallel and combines them together for more stable predictions. By considering a random subset of predictors for each split, the Random Forest de-correlates the trees and at the same time makes sure the final decisions head in the correct direction since the majority of base classifiers would make the right choices even if some are wrong. For a Random Forest classifier, a lot of hyperparameters can potentially influence the model performance, for example the number of base classifiers to employ, the maximum depth and minimum number of nodes in each tree, the number of features to consider in a split, and the impurity measure, etc. 
 
 #### SVM {-}
 
-Using the Support Vector Machines, the most important parameter to tune is the kernel. Some of the commonly used nonlinear kernels are polynomial, radial basis, and Sigmoid function kernels. We would expect a polynomial or radial basis kernel to perform better as they allow more flexible decision boundaries. 
+Using the Support Vector Machines, the most important parameter to tune is the kernel function. Some of the commonly used nonlinear kernels are polynomial, radial basis, and Sigmoid function kernels. We would expect a polynomial or radial basis kernel to perform better as they allow more flexible decision boundaries. 
 
 #### Gaussian Process Classifier {-}
 
@@ -233,14 +230,14 @@ We use the Python Machine Learning Library `scikit-learn` to implement the model
 
 With a randomized grid search, we found the the following setting performs the best: training 800 base classifiers with a maximum depth of 40, considering $\sqrt{p}$ features in each split where $p$ is the total number of features, splitting an internal node only when there are at least 15 samples in the current node and at least 2 samples in each of the left and right branches, and using the Gini index as the impurity criterion.  
 
-Using the tuned Random Forest classifier, the accuracy on our training data set and test set are 91.87% and 69.06%, respectively. As we can see from the receiver operating characteristic curve (ROC) (Figure \@ref(fig:roc-all)) and the confusion matrix (Table \@ref(tab:conf-mat-all)), the AUC reaches 0.7230 and the BER is 0.3281. The Random Forest classifier seems to work well in terms of accuracy and AUC, but it makes a lot of type II errors and thus cannot identify weather conditions that will lead to severe weather events, which is against the goal of our study. 
+Using the tuned Random Forest classifier, the accuracy on our training data set and test set are 91.87% and 69.06%, respectively. As we can see from the receiver operating characteristic (ROC) curve (Figure \@ref(fig:roc-all)) and the confusion matrix (Table \@ref(tab:conf-mat-all)), the AUC reaches 0.7230 and the BER is 0.3281. The Random Forest classifier seems to work well in terms of accuracy and AUC, but it makes a lot of type II errors and thus cannot identify weather conditions that will lead to severe weather events, which is against the goal of our study. 
 
 ```{r roc-conf-mat-rf, fig.show = "hold", out.width = "48%", eval = FALSE}
 knitr::include_graphics("cache/results_roc_rf.png")
 knitr::include_graphics("cache/results_conf_mat_rf.png")
 ```
 
-The Random Forest classifier has better interpretability than the other two models, as it allows us to compare the importance of features (Figure \@ref(fig:feature-imp)). [TODO: add more analysis]
+Despite our concerns for the false negative predictions, the Random Forest classifier has better interpretability than the other two models, as it allows us to compare the importance of features. From the relative influence plot (Figure \@ref(fig:feature-imp)), we see that the most helpful indicator is the monthly average temperature, followed by the average diurnal temperature variation. This fits our prior expectation that higher temperatures add to the probability of having extreme climatic events. The rest of the weather measurements have similar importance, while the state variable is the least important one, indicating that the weather measurements alone can account for most of the geographical factors that influence the extreme weather events. 
 
 ```{r feature-imp, out.width = "60%", fig.cap = "Relative influence plot of the features"}
 knitr::include_graphics("cache/results_feature_importance_rf.png")
@@ -250,29 +247,27 @@ knitr::include_graphics("cache/results_feature_importance_rf.png")
 
 The best performance is given by an RBF kernel SVM with $\gamma=1$ and $C=5$. The parameter $\gamma$ defines how far the influence of a single training example reaches, and $C$ is the coefficient for the penalty term, determines how much error is bearable and controls the bias-variance trade-off. We have relatively low $\gamma$ and $C$ values, which means that we give less weight to the training data and our model will have a simpler decision function with a larger margin.  
 
-The tuned SVM model gives a training-set accuracy of 73.92%, a test accuracy of 66.19%, an AUC of 0.7102 and a BER of 0.3425. It is less satisfactory than the Random Forest in terms of accuracy, AUC and BER, but it also makes less type II errors. 
+The tuned SVM model gives a training-set accuracy of 73.92%, a test accuracy of 66.19%, an AUC of 0.7102 and a BER of 0.3425. It is less satisfactory than the Random Forest in terms of accuracy, AUC and BER. While the SVM makes fewer type II errors, it makes the most type I errors out of the three classifiers, which can lead to false alarms. 
 
 
 #### Gaussian Process Classifier {-}
 
-Of the available kernel functions, we find that an RBF kernel works best for this dataset. Since the Gaussian Process Classifier is a Bayesian method, the rest of the hyperparameters are optimized during fitting. 
-
-The tuned GP classifier gives a training-set accuracy of 73.68%, test accuracy of 68.11%, AUC of 0.7078 and BER of 0.3277. We choose this model as the optimal classifier as it has fairly good accuracy, AUC, and BER and it classified both true 0 and 1 samples well. 
+Of the available kernel functions, we find that an RBF kernel works best for this dataset. The rest of the hyperparameters are optimized during fitting. The tuned GP classifier gives a training-set accuracy of 73.68%, test accuracy of 68.11%, AUC of 0.7078 and BER of 0.3277. We choose this model as the optimal classifier as it has fairly good accuracy, AUC, and BER and it classified both true 0 and 1 samples well. 
 
 
-```{r roc-all, out.width = "60%", fig.cap = "Receiver operating characteristic curves of the three algorithms with tuned hyperparameters"}
+```{r roc-all, out.width = "70%", fig.cap = "Receiver operating characteristic curves of the three algorithms with tuned hyperparameters"}
 knitr::include_graphics("cache/results_roc_3models.png")
 ```
 
 ```{r conf-mat-all}
 tribble(
-  ~Model, ~TN, ~FP, ~FN, ~TP,
-  "Random Forest", 192, 60, 69, 96,
-  "RBF-SVM", 171, 81, 60, 105,
-  "Gaussian Process", 180, 72, 61, 104
+  ~Model, ~TN, ~FP, ~FN, ~TP, ~Accuracy, ~BER, ~AUC,
+  "Random Forest", 192, 60, 69, 96, 0.6906, 0.3281, 0.7230,
+  "RBF-SVM", 171, 81, 60, 105, 0.6619, 0.3425, 0.7102,
+  "Gaussian Process", 180, 72, 61, 104, 0.6811, 0.3277, 0.7078
 ) %>% 
   knitr::kable(format = "latex", booktabs = TRUE, 
-               caption = "Confusion matrix of the three algorithms with tuned hyperparameters") %>%
+               caption = "Confusion matrix, accuracy, BER, and AUC on the test set") %>%
   kableExtra::row_spec(row = 0, bold = TRUE, align = 'c') %>%
   kableExtra::kable_styling(latex_options = c("HOLD_position"))
 ```
@@ -280,8 +275,8 @@ tribble(
 # Conclusions
 
 This project studies the relationship between extreme weather events in the U.S. and historical weather data. We tried different classification algorithms to compare their performance. 
-When it comes to predictive power, the Gaussian Process Classifier has the best BER, while the xxx [TODO: update] has the best AUC value. 
-With the Random Forest classifier, we are able to get a summary of the variable importance. Variable xxx [TODO: update] is the most helpful indicator for forecasting extreme weather events, followed by xxx [TODO: update]. 
+When it comes to predictive power, the Gaussian Process classifier gives the lowest BER and is our optimal classifier if we deem the correct predicted labels most important.  While the Random Forest classifier has the best test accuracy and AUC value, it gives many false negative predictions, which is against our primary goal of identifying weather conditions that can lead to severe weather disasters. 
+In terms of interpretability, the Random Forest classifier allows us to compare feature importance. The monthly mean temperature is the most helpful indicator for forecasting extreme weather events, followed by the monthly average diurnal temperature variation. The categorical variable `state` is the least helpful feature, suggesting that the weather measurements themselves are able to capture most of the geographical factors impacting the outcome variable. 
 
 # Future Work
 
@@ -297,12 +292,12 @@ When it comes to the predictors, this study uses the city-level data as an appro
 # Appendix {-} 
 
 ```{r us-cities, echo = FALSE}
-city1 = city %>% select(city, state, county) %>% slice(1:14)
-city2 = city %>% select(city, state, county) %>% slice(15:27) %>% add_row()
+city1 = city %>% select(city, county, state) %>% slice(1:14)
+city2 = city %>% select(city, county, state) %>% slice(15:27) %>% add_row()
 bind_cols(city1, city2) %>%
   knitr::kable(format = "latex", booktabs = TRUE, 
                caption = "The 27 U.S. cities where weather data are available",
-               col.names = rep(c("city", "state", "county"), 2)) %>%
+               col.names = rep(c("city", "county", "state"), 2)) %>%
   kableExtra::row_spec(row = 0, bold = TRUE, align = 'c') %>%
   kableExtra::column_spec (3, border_right = TRUE) %>%
   kableExtra::column_spec (c(1, 4), bold = TRUE) %>%
