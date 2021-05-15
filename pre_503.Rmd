@@ -143,7 +143,7 @@ ggplot() +
 ## Dataset 2: Hourly weather dataset
 
 * Contains hourly observations for humidity, pressure, temperature, wind direction, and wind speed (all numeric).
-* Convert to monthly observations to match with the windstorm dataset and deal with missing values
+* Convert to monthly observations to match with the windstorm dataset and deal with missing values.
     - hourly observations $\rightarrow$ daily mean values $\rightarrow$ monthly average and standard deviation
     - 12 numeric weather measurements
 
