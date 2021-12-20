@@ -1,3 +1,9 @@
+# Temporal projection of natural atmospheric events in the United States
+
+* Term project for STATS 503 (Multivariate Analysis), WN21
+* Group member: Haejeong Choi, Yanyu Long, Seung Ho Woo
+* [Report](output/report.pdf) | Presentation [slides](output/presentation.pdf)
+
 ### Wind storm dataset
 
 * Data source: [National Centers for Environmental Information (NOAA)](https://www1.ncdc.noaa.gov/pub/data/swdi/stormevents/csvfiles/)
@@ -9,6 +15,8 @@
     - StormEvents_details-ftp_v1.0_d2016_c20190817.csv
     - StormEvents_details-ftp_v1.0_d2017_c20210120.csv
 * [Data format documentation](https://www1.ncdc.noaa.gov/pub/data/swdi/stormevents/csvfiles/Storm-Data-Export-Format.pdf)
+* Other related links
+    - https://www.ncdc.noaa.gov/news/storm-events-database-version-30
 
 ### United States Cities Database
 
@@ -17,3 +25,5 @@
 
 ### Historical Hourly Weather Data 2012-2017
 * source: https://www.kaggle.com/selfishgene/historical-hourly-weather-data
+* units of the observed variables: https://openweathermap.org/history#historybulk
+
