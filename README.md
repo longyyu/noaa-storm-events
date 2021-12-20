@@ -4,6 +4,8 @@
 * Group member: Haejeong Choi, Yanyu Long, Seung Ho Woo
 * [Report](output/report.pdf) | Presentation [slides](output/presentation.pdf)
 
+## Data
+
 ### Wind storm dataset
 
 * Data source: [National Centers for Environmental Information (NOAA)](https://www1.ncdc.noaa.gov/pub/data/swdi/stormevents/csvfiles/)
